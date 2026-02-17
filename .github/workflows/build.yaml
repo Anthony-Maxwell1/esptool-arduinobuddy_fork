@@ -1,0 +1,93 @@
+name: Build stripped esptool release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) Checkout project
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2) Set up Python (needed for dependency tracing)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3) Create stripped build directory
+      - name: Prepare stripped build
+        run: |
+          mkdir build
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='*.md' \
+            --exclude='docs/' \
+            --exclude='tests/' \
+            --exclude='test/' \
+            --exclude='examples/' \
+            --exclude='*.png' \
+            --exclude='*.jpg' \
+            --exclude='*.svg' \
+            --exclude='*.txt' \
+            --exclude='LICENSE*' \
+            ./ build/
+
+      # 4) Optional: auto-trim Python files not imported by esptool.py
+      # (keeps only files referenced by import graph)
+      - name: Strip unused Python modules
+        run: |
+          cd build
+          python - << 'EOF'
+          import os
+          import modulefinder
+          import shutil
+
+          ENTRY = "esptool.py"
+
+          finder = modulefinder.ModuleFinder()
+          finder.run_script(ENTRY)
+
+          keep_files = set()
+          for name, mod in finder.modules.items():
+              if mod.__file__:
+                  keep_files.add(os.path.abspath(mod.__file__))
+
+          # Always keep entry script
+          keep_files.add(os.path.abspath(ENTRY))
+
+          # Remove .py files not used
+          for root, dirs, files in os.walk("."):
+              for f in files:
+                  if f.endswith(".py"):
+                      path = os.path.abspath(os.path.join(root, f))
+                      if path not in keep_files:
+                          os.remove(path)
+          EOF
+
+      # 5) Create zip archive
+      - name: Zip build
+        run: |
+          cd build
+          zip -r ../esptool-stripped.zip .
+
+      # 6) Create GitHub release
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Automated build ${{ github.run_number }}"
+          files: esptool-stripped.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

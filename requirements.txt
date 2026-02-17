@@ -1,0 +1,7 @@
+bitstring
+cryptography
+reedsolo
+PyYAML
+intelhex
+rich_click
+click
