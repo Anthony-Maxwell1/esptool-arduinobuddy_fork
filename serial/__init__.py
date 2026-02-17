@@ -1,6 +1,33 @@
-from org.thatdev.ArduinoBuddy import UsbBridge
+VERSION = '0.0.0'
+
+# from org.thatdev.ArduinoBuddy import UsbBridge
+from . import UsbBridge
 from serial.serialutil import SerialException, to_bytes, PortNotOpenError, SerialTimeoutException
 import time
+
+try:
+    memoryview
+except (NameError, AttributeError):
+    # implementation does not matter as we do not really use it.
+    # it just must not inherit from something else we might care for.
+    class memoryview(object):   # pylint: disable=redefined-builtin,invalid-name
+        pass
+
+try:
+    unicode
+except (NameError, AttributeError):
+    unicode = str
+
+try:
+    basestring
+except (NameError, AttributeError):
+    basestring = str
+
+XON = to_bytes([17])
+XOFF = to_bytes([19])
+
+CR = to_bytes([13])
+LF = to_bytes([10])
 
 PARITY_NONE, PARITY_EVEN, PARITY_ODD, PARITY_MARK, PARITY_SPACE = 'N', 'E', 'O', 'M', 'S'
 STOPBITS_ONE, STOPBITS_ONE_POINT_FIVE, STOPBITS_TWO = (1, 1.5, 2)
@@ -83,29 +110,29 @@ class SerialBase:
 
             if port is not None:
                 self.open()
-                @property
-                    def port(self):
-                        """\
-                        Get the current port setting. The value that was passed on init or using
-                        setPort() is passed back.
-                        """
-                        return self._port
+    @property
+    def port(self):
+        """\
+        Get the current port setting. The value that was passed on init or using
+        setPort() is passed back.
+        """
+        return self._port
 
-                    @port.setter
-                    def port(self, port):
-                        """\
-                        Change the port.
-                        """
-                        if port is not None and not isinstance(port, basestring):
-                            raise ValueError('"port" must be None or a string, not {}'.format(type(port)))
-                        was_open = self.is_open
-                        if was_open:
-                            self.close()
-                        self.portstr = port
-                        self._port = port
-                        self.name = self.portstr
-                        if was_open:
-                            self.open()
+    @port.setter
+    def port(self, port):
+        """\
+        Change the port.
+        """
+        if port is not None and not isinstance(port, basestring):
+            raise ValueError('"port" must be None or a string, not {}'.format(type(port)))
+        was_open = self.is_open
+        if was_open:
+            self.close()
+        self.portstr = port
+        self._port = port
+        self.name = self.portstr
+        if was_open:
+            self.open()
 
     @property
     def baudrate(self):

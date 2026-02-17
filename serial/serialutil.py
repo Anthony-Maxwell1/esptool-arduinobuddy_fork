@@ -1,3 +1,21 @@
+try:
+    memoryview
+except (NameError, AttributeError):
+    # implementation does not matter as we do not really use it.
+    # it just must not inherit from something else we might care for.
+    class memoryview(object):   # pylint: disable=redefined-builtin,invalid-name
+        pass
+
+try:
+    unicode
+except (NameError, AttributeError):
+    unicode = str
+
+try:
+    basestring
+except (NameError, AttributeError):
+    basestring = str
+
 # so a simple ``bytes(sequence)`` doesn't work for all versions
 def to_bytes(seq):
     """convert a sequence to a bytes type"""

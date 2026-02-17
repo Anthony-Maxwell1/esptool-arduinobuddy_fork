@@ -1,4 +1,5 @@
-from org.thatdev.ArduinoBuddy import UsbBridge
+# from org.thatdev.ArduinoBuddy import UsbBridge
+from .. import UsbBridge
 
 def iterate_comports():
     devices = UsbBridge.getPorts()
