@@ -14,6 +14,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip build if [NO-BUILD] in commit
+        run: |
+          # Get last commit message in this push
+          MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $MSG"
+          if echo "$MSG" | grep -q '\[NO-BUILD\]'; then
+            echo "Skipping build due to [NO-BUILD] in commit message."
+            exit 0
+          fi
       # 1) Checkout project
       - name: Checkout repository
         uses: actions/checkout@v4
