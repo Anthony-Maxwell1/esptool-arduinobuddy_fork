@@ -1,34 +1,35 @@
-# SPDX-FileCopyrightText: 2025-2026 Fredrik Ahlberg, Angus Gratton,
+# SPDX-FileCopyrightText: 2026 Fredrik Ahlberg, Angus Gratton,
 # Espressif Systems (Shanghai) CO LTD, other contributors as noted.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import struct
 
-from .esp32c5 import ESP32C5ROM
+from .esp32 import ESP32ROM
 from ..loader import ESPLoader, StubMixin
-from ..util import FatalError, NotImplementedInROMError
 from ..logger import log
+from ..util import FatalError, NotSupportedError
 
 
-class ESP32S31ROM(ESP32C5ROM):
-    CHIP_NAME = "ESP32-S31"
-    IMAGE_CHIP_ID = 32
+class ESP32E22ROM(ESP32ROM):
+    CHIP_NAME = "ESP32-E22"
+    IMAGE_CHIP_ID = 31
 
-    IROM_MAP_START = 0x40000000
-    IROM_MAP_END = 0x54000000
-    DROM_MAP_START = 0x40000000
-    DROM_MAP_END = 0x54000000
+    IROM_MAP_START = 0x3C000000
+    IROM_MAP_END = 0x40000000
+    DROM_MAP_START = 0x3C000000
+    DROM_MAP_END = 0x40000000
 
-    BOOTLOADER_FLASH_OFFSET = 0x2000  # First 2 sectors are reserved for FE purposes
+    BOOTLOADER_FLASH_OFFSET = 0x0
 
-    UART_DATE_REG_ADDR = 0x2038A000 + 0x8C
+    UART_DATE_REG_ADDR = 0xC3102000 + 0x8C
+    UART_CLKDIV_REG = 0xC3102000 + 0x14
 
-    EFUSE_BASE = 0x20715000
+    EFUSE_BASE = 0xC4008000
     EFUSE_BLOCK1_ADDR = EFUSE_BASE + 0x044
     MAC_EFUSE_REG = EFUSE_BASE + 0x044
 
-    SPI_REG_BASE = 0x20500000  # SPIMEM1
+    SPI_REG_BASE = 0xC3003000  # SPIMEM1
     SPI_USR_OFFS = 0x18
     SPI_USR1_OFFS = 0x1C
     SPI_USR2_OFFS = 0x20
@@ -53,11 +54,11 @@ class ESP32S31ROM(ESP32C5ROM):
     EFUSE_PURPOSE_KEY5_REG = EFUSE_BASE + 0x38
     EFUSE_PURPOSE_KEY5_SHIFT = 12
 
-    EFUSE_DIS_DOWNLOAD_MANUAL_ENCRYPT_REG = EFUSE_RD_REG_BASE
-    EFUSE_DIS_DOWNLOAD_MANUAL_ENCRYPT = 1 << 20
-
-    EFUSE_SPI_BOOT_CRYPT_CNT_REG = EFUSE_BASE + 0x034
-    EFUSE_SPI_BOOT_CRYPT_CNT_MASK = 0x7 << 18
+    # TODO Fields are not present in efuse table.
+    # EFUSE_DIS_DOWNLOAD_MANUAL_ENCRYPT_REG = EFUSE_RD_REG_BASE
+    # EFUSE_DIS_DOWNLOAD_MANUAL_ENCRYPT = 1 << 20
+    # EFUSE_SPI_BOOT_CRYPT_CNT_REG = EFUSE_BASE + 0x034
+    # EFUSE_SPI_BOOT_CRYPT_CNT_MASK = 0x7 << 18
 
     EFUSE_SECURE_BOOT_EN_REG = EFUSE_BASE + 0x038
     EFUSE_SECURE_BOOT_EN_MASK = 1 << 20
@@ -68,22 +69,32 @@ class ESP32S31ROM(ESP32C5ROM):
 
     FLASH_ENCRYPTED_WRITE_ALIGN = 16
 
+    USES_MAGIC_VALUE = False
+
+    UARTDEV_BUF_NO = 0x3111B700  # Variable in ROM .bss which indicates the port in use
+    UARTDEV_BUF_NO_USB_OTG = 3  # The above var when USB-OTG is used
+
+    USB_RAM_BLOCK = 0x800  # Max block size USB-OTG is used
+
+    GPIO_STRAP_REG = 0xC310D000
+    GPIO_STRAP_SPI_BOOT_MASK = 1 << 3  # Not download mode
+    RTC_CNTL_OPTION1_REG = 0x3F408128
+    RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK = 0x1  # Is download mode forced over USB?
+
     MEMORY_MAP = [
         [0x00000000, 0x00010000, "PADDING"],
-        [0x40000000, 0x54000000, "DROM"],
-        [0x2F000000, 0x2F080000, "DRAM"],
-        [0x2F000000, 0x2F080000, "BYTE_ACCESSIBLE"],
-        [0x2F800000, 0x2F850000, "DROM_MASK"],
-        [0x2F800000, 0x2F850000, "IROM_MASK"],
-        [0x40000000, 0x54000000, "IROM"],
-        [0x2F000000, 0x2F080000, "IRAM"],
-        [0x2E000000, 0x2E008000, "RTC_IRAM"],
-        [0x2E000000, 0x2E008000, "RTC_DRAM"],
+        [0x3C000000, 0x40000000, "DROM"],
+        [0x31000000, 0x31200000, "DRAM"],
+        [0x31000000, 0x31200000, "BYTE_ACCESSIBLE"],
+        [0x30000000, 0x30120000, "DROM_MASK"],
+        [0x30000000, 0x30120000, "IROM_MASK"],
+        [0x3C000000, 0x40000000, "IROM"],
+        [0x30FE0000, 0x31200000, "IRAM"],
+        [0xC0000000, 0xC0008000, "RTC_IRAM"],
+        [0xC0000000, 0xC0008000, "RTC_DRAM"],
+        # [0x600FE000, 0x60100000, "MEM_INTERNAL2"],
     ]
 
-    UF2_FAMILY_ID = 0x3101F7C1
-
-    EFUSE_MAX_KEY = 5
     KEY_PURPOSES: dict[int, str] = {
         0: "USER/EMPTY",
         1: "ECDSA_KEY",
@@ -101,45 +112,49 @@ class ESP32S31ROM(ESP32C5ROM):
     }
 
     def get_pkg_version(self):
-        num_word = 2
-        return (self.read_reg(self.EFUSE_BLOCK1_ADDR + (4 * num_word)) >> 20) & 0x07
+        # TODO: It is not yet allocated in efuse table.
+        return 0
 
     def get_minor_chip_version(self):
-        num_word = 2
-        return (self.read_reg(self.EFUSE_BLOCK1_ADDR + (4 * num_word)) >> 0) & 0x0F
+        # TODO: It is not yet allocated in efuse table.
+        return 0
 
     def get_major_chip_version(self):
-        num_word = 2
-        return (self.read_reg(self.EFUSE_BLOCK1_ADDR + (4 * num_word)) >> 4) & 0x03
+        # TODO: It is not yet allocated in efuse table.
+        return 0
+
+    def get_encrypted_download_disabled(self):
+        # TODO: DIS_DOWNLOAD_MANUAL_ENCRYPT is not yet allocated in efuse table.
+        return 0
+
+    def get_flash_encryption_enabled(self):
+        # TODO: SPI_BOOT_CRYPT_CNT is not yet allocated in efuse table.
+        return 0
 
     def get_chip_description(self):
         chip_name = {
-            0: "ESP32-S31",
-        }.get(self.get_pkg_version(), "unknown ESP32-S31")
+            0: "ESP32-E22",
+        }.get(self.get_pkg_version(), "unknown ESP32-E22")
         major_rev = self.get_major_chip_version()
         minor_rev = self.get_minor_chip_version()
         return f"{chip_name} (revision v{major_rev}.{minor_rev})"
 
     def get_chip_features(self):
         return [
-            "Wi-Fi 6",
-            "BT 5.4 (LE)",
-            "IEEE802.15.4",
-            "Dual Core + LP Core",
-            "300MHz",
+            "Wi-Fi 6E (tri-band, 2x2 MU-MIMO)",
+            "BT 5.4 (LE) + Classic",
+            "Dual Core",
+            "500MHz",
         ]
 
     def get_crystal_freq(self):
-        # ESP32-S31 XTAL is fixed to 40MHz
-        return 40
+        return ESPLoader.get_crystal_freq(self)
 
     def get_flash_voltage(self):
-        pass  # not supported on ESP32-S31
+        pass  # not supported on ESP32-E22
 
     def override_vddsdio(self, new_voltage):
-        raise NotImplementedInROMError(
-            "VDD_SDIO overrides are not supported for ESP32-S31"
-        )
+        raise NotSupportedError(self, "Overriding VDDSDIO")
 
     def read_mac(self, mac_type="BASE_MAC"):
         """Read MAC from EFUSE region"""
@@ -151,13 +166,17 @@ class ESP32S31ROM(ESP32C5ROM):
         return tuple(bitstring)
 
     def get_flash_crypt_config(self):
-        return None  # doesn't exist on ESP32-S31
+        return None  # doesn't exist on ESP32-E22
 
     def get_secure_boot_enabled(self):
         return (
             self.read_reg(self.EFUSE_SECURE_BOOT_EN_REG)
             & self.EFUSE_SECURE_BOOT_EN_MASK
         )
+
+    def get_secure_boot_v1_enabled(self):
+        # Secure Boot V1 is only supported on ESP32, not on ESP32-E22
+        return False
 
     def get_key_block_purpose(self, key_block):
         if key_block < 0 or key_block > self.EFUSE_MAX_KEY:
@@ -175,7 +194,7 @@ class ESP32S31ROM(ESP32C5ROM):
         ][key_block]
         return (self.read_reg(reg) >> shift) & 0xF
 
-    def is_flash_encryption_key_valid(self):
+    def is_flash_encryption_key_valid(self):  # TODO: FE exists?
         # Need to see either an AES-128 key or two AES-256 keys
         purposes = [
             self.get_key_block_purpose(b) for b in range(self.EFUSE_MAX_KEY + 1)
@@ -191,24 +210,45 @@ class ESP32S31ROM(ESP32C5ROM):
     def change_baud(self, baud):
         ESPLoader.change_baud(self, baud)
 
-    def _post_connect(self):
-        pass
-        # TODO: Disable watchdogs when USB modes are supported in the stub
-        # if not self.sync_stub_detected:  # Don't run if stub is reused
-        #     self.disable_watchdogs()
+    def uses_usb_otg(self):
+        """
+        Check the UARTDEV_BUF_NO register to see if USB-OTG console is being used
+        """
+        if self.secure_download_mode:
+            return False  # can't detect native USB in secure download mode
+        return self.get_uart_no() == self.UARTDEV_BUF_NO_USB_OTG
 
-    def check_spi_connection(self, spi_connection):
-        if not set(spi_connection).issubset(set(range(0, 61))):
-            raise FatalError("SPI Pin numbers must be in the range 0-60.")
-        if any([v for v in spi_connection if v in [33, 34]]):
+    def check_spi_connection(self, spi_connection):  # TODO: Check pins
+        if not set(spi_connection).issubset(set(range(0, 53))):
+            raise FatalError("SPI Pin numbers must be in the range 0-52.")
+        if any([v for v in spi_connection if v in [18, 19]]):
             log.warning(
-                "GPIO pins 33 and 34 are used by USB-Serial/JTAG, "
+                "GPIO pins 18 and 19 are used by USB-OTG, "
                 "consider using other pins for SPI flash connection."
             )
 
+    # Watchdog reset is not supported on ESP32-E22
+    def watchdog_reset(self):
+        ESPLoader.watchdog_reset(self)
 
-class ESP32S31StubLoader(StubMixin, ESP32S31ROM):
-    """Stub loader for ESP32-S31, runs on top of ROM."""
+    def hard_reset(self):
+        uses_usb_otg = self.uses_usb_otg()
+        if uses_usb_otg:
+            # Check the strapping register to see if we can perform a watchdog reset
+            strap_reg = self.read_reg(self.GPIO_STRAP_REG)
+            force_dl_reg = self.read_reg(self.RTC_CNTL_OPTION1_REG)
+            if (
+                strap_reg & self.GPIO_STRAP_SPI_BOOT_MASK == 0  # GPIO0 low
+                and force_dl_reg & self.RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK == 0
+            ):
+                self.watchdog_reset()
+                return
+
+        ESPLoader.hard_reset(self)
+
+
+class ESP32E22StubLoader(StubMixin, ESP32E22ROM):
+    """Stub loader for ESP32-E22, runs on top of ROM."""
 
     def __init__(self, rom_loader):
         super().__init__(rom_loader)  # Initialize the mixin
@@ -217,4 +257,4 @@ class ESP32S31StubLoader(StubMixin, ESP32S31ROM):
             self.FLASH_WRITE_SIZE = self.USB_RAM_BLOCK
 
 
-ESP32S31ROM.STUB_CLASS = ESP32S31StubLoader
+ESP32E22ROM.STUB_CLASS = ESP32E22StubLoader
